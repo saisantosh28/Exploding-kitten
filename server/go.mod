@@ -8,6 +8,8 @@ require (
 )
 
 require (
+	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/gomega v1.31.1 // indirect
+	golang.org/x/net v0.19.0 // indirect
 )
