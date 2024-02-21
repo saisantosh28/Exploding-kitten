@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/saisantosh28/exploding-kitten/api"
-	"github.com/saisantosh28/exploding-kitten/services"
+	"github.com/saisantosh28/Exploding-kitten/server/api"
+	"github.com/saisantosh28/Exploding-kitten/server/services"
 )
 
 func main() {
