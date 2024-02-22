@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/saisantosh28/Exploding-kitten/server/models"
@@ -31,8 +33,8 @@ func InitRedis() error {
 	return nil
 }
 
-// SetUser sets a user in the Redis database.
-func SetUser(user *models.User) error {
+// CreateUser creates a new user in the Redis database.
+func CreateUser(user *models.User) error {
 	if redisClient == nil {
 		return errors.New("Redis client is not initialized")
 	}
@@ -50,71 +52,76 @@ func SetUser(user *models.User) error {
 	return nil
 }
 
-// GetUser gets a user from the Redis database by ID.
-func GetUser(id string) (*models.User, error) {
-	if redisClient == nil {
-		return nil, errors.New("Redis client is not initialized")
-	}
-
-	userJSON, err := redisClient.Get(redisClient.Context(), fmt.Sprintf("user:%s", id)).Bytes()
-	if err != nil {
-		return nil, err
-	}
-
-	var user models.User
-	err = json.Unmarshal(userJSON, &user)
-	if err != nil {
-		return nil, err
-	}
-
-	return &user, nil
-}
-
-// UpdateUserScore updates the score of a user in the Redis database.
-func UpdateUserScore(id string, score int) error {
+// StartGame starts a new game session for a user.
+func StartGame(game *models.Game) error {
 	if redisClient == nil {
 		return errors.New("Redis client is not initialized")
 	}
 
-	user, err := GetUser(id)
+	// Create a deck of cards
+	deck := []string{"Cat", "Cat", "Cat", "Cat", "Exploding Kitten", "Defuse", "Shuffle"}
+
+	// Shuffle the deck
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(deck), func(i, j int) { deck[i], deck[j] = deck[j], deck[i] })
+
+	// Set the deck and status in the game
+	game.Deck = deck
+	game.Status = "ongoing"
+
+	// Save the game state
+	err := SaveGame(game)
 	if err != nil {
 		return err
 	}
 
-	user.Score = score
-
-	// After updating the user, save it back to Redis
-	return SetUser(user)
+	return nil
 }
 
-// GetLeaderboard retrieves the current leaderboard from the Redis database.
-func GetLeaderboard() ([]models.User, error) {
+// DrawCard draws a card from the game deck for the user.
+func DrawCard(game *models.Game) (string, error) {
 	if redisClient == nil {
-		return nil, errors.New("Redis client is not initialized")
+		return "", errors.New("Redis client is not initialized")
 	}
 
-	var users []models.User
-	keys, err := redisClient.Keys(redisClient.Context(), "user:*").Result()
+	// Check if the game is ongoing
+	if game.Status != "ongoing" {
+		return "", errors.New("game is not ongoing")
+	}
+
+	// Check if the deck is empty
+	if len(game.Deck) == 0 {
+		return "", errors.New("deck is empty")
+	}
+
+	// Draw a card from the deck
+	card := game.Deck[0]
+
+	// Remove the drawn card from the deck
+	game.Deck = game.Deck[1:]
+
+	// Check the drawn card
+	switch card {
+	case "Cat":
+		// Cat card: Do nothing, just continue the game
+	case "Exploding Kitten":
+		// Exploding Kitten: Player loses the game
+		game.Status = "lost"
+	case "Defuse":
+		// Defuse card: Do nothing, can be used to defuse Exploding Kitten
+	case "Shuffle":
+		// Shuffle card: Shuffle the deck again
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(game.Deck), func(i, j int) { game.Deck[i], game.Deck[j] = game.Deck[j], game.Deck[i] })
+	}
+
+	// Save the updated game state
+	err := SaveGame(game)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	for _, key := range keys {
-		userJSON, err := redisClient.Get(redisClient.Context(), key).Bytes()
-		if err != nil {
-			return nil, err
-		}
-
-		var user models.User
-		err = json.Unmarshal(userJSON, &user)
-		if err != nil {
-			return nil, err
-		}
-
-		users = append(users, user)
-	}
-
-	return users, nil
+	return card, nil
 }
 
 // SaveGame saves the game state to the Redis database.
@@ -154,4 +161,90 @@ func GetGame(id string) (*models.Game, error) {
 	}
 
 	return &game, nil
+}
+
+// GetLeaderboard retrieves the current leaderboard from the Redis database.
+func GetLeaderboard() ([]models.User, error) {
+	if redisClient == nil {
+		return nil, errors.New("Redis client is not initialized")
+	}
+
+	var users []models.User
+	keys, err := redisClient.Keys(redisClient.Context(), "user:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, key := range keys {
+		userJSON, err := redisClient.Get(redisClient.Context(), key).Bytes()
+		if err != nil {
+			return nil, err
+		}
+
+		var user models.User
+		err = json.Unmarshal(userJSON, &user)
+		if err != nil {
+			return nil, err
+		}
+
+		users = append(users, user)
+	}
+
+	return users, nil
+}
+
+// UpdateUserScore updates the score of a user in the Redis database.
+func UpdateUserScore(id string, score int) error {
+	if redisClient == nil {
+		return errors.New("Redis client is not initialized")
+	}
+
+	user, err := GetUser(id)
+	if err != nil {
+		return err
+	}
+
+	user.Score = score
+
+	// After updating the user, save it back to Redis
+	return SetUser(user)
+}
+
+// SetUser sets a user in the Redis database.
+func SetUser(user *models.User) error {
+	if redisClient == nil {
+		return errors.New("Redis client is not initialized")
+	}
+
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return err
+	}
+
+	err = redisClient.Set(redisClient.Context(), fmt.Sprintf("user:%s", user.ID), userJSON, 0).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// GetUser gets a user from the Redis database by ID.
+func GetUser(id string) (*models.User, error) {
+	if redisClient == nil {
+		return nil, errors.New("Redis client is not initialized")
+	}
+
+	userJSON, err := redisClient.Get(redisClient.Context(), fmt.Sprintf("user:%s", id)).Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	var user models.User
+	err = json.Unmarshal(userJSON, &user)
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
 }
